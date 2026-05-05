@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+# Note: this code was partially refactored via ChatGSFC
+
 import argparse
 import logging
 import os
