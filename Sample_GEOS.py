@@ -15,6 +15,7 @@ import numpy as np
 import os
 import pandas as pd
 import pickle
+# this is a slimmer and faster library, however cannot be pickled! - shame!
 #from pykdtree.kdtree import KDTree
 from scipy.spatial import cKDTree
 import shutil
@@ -42,11 +43,15 @@ def setup_argparse():
         epilog="Author: Peter Somkuti"
     )
 
-    parser.add_argument("--scene", type=str, required=True, help="Scene file location")
+    parser.add_argument("--scene", type=str, required=True,
+                        help="Scene file location")
+    parser.add_argument("--output", type=str, required=True,
+                        help="Output file location.")
+
+    parser.add_argument("--DYAMONDroot", type=str, required=False,
+                        help="Path to DYAMOND run root directory.")
     parser.add_argument("--NN", type=int, required=False, default=1,
                         help="Number of nearest neighbors for cube-sphere sampling.")
-    parser.add_argument("--output", type=str, required=True, help="Output file location.")
-
     parser.add_argument("--overwrite", action="store_true", default=False,
                         help="Overwrite existing output file.")
     parser.add_argument("--parallel", action="store_true", default=False,
@@ -380,6 +385,7 @@ def g_from_latitude(lat):
     return 9.780327 * (1 + 0.0053024 * np.sin(latrad)**2 - 0.0000058 * np.sin(2*latrad)**2)
 
 def g_from_alt_and_lat(alt, lat):
+
     # Alt must be in m for this..
     Re = 6_371_000.0
     g0 = g_from_latitude(lat)
@@ -410,7 +416,25 @@ def main():
         client = None
         logging.info("Only serial computations..")
 
-    root = "/css/g5nr/DYAMONDv2/03KM/DYAMONDv2_c2880_L181"
+
+    # Flags that tell our code whether we are working with
+    #   a) DYAMOND model run files
+    #   b) GEOS CARB ana files
+
+    mode_DYAMOND = False
+    mode_GEOSCARB = False
+
+    if args.DYAMONDroot is not None:
+
+        mode_DYAMOND = True
+        root = args.DYAMONDroot
+        # Should be something like "/css/g5nr/DYAMONDv2/03KM/DYAMONDv2_c2880_L181"
+        logging.info(f"Root directory for DYAMOND supplied: {root}")
+
+
+    if (~mode_DYAMOND) and (~mode_GEOSCARB):
+        logging.error("Need to set at least `DYAMONDroot` or `GEOSCARBroot`!")
+        sys.exit(!)
 
     h5_scene = h5py.File(args.scene, "r")
 
@@ -471,7 +495,7 @@ def main():
 
     varlist_3d = ["AIRDENS", "QL", "RL", "QI", "RI", "FCLD", "QV", "DELP", "P", "CO2", "H", "T"]
     # add aerosols
-    # (note that SU aerosols are )
+    # (note that SU aerosols are named `SO4` in the DYAMOND collection)
     aerlist = ["BC", "DU", "OC", "SS", "SO4"]
     varlist_3d += aerlist
 
@@ -483,11 +507,14 @@ def main():
         ymd = ymdh[:8]
 
         for var3d in varlist_3d:
-            fname = glob.glob(f"{root}/inst_01hr_3d_{var3d}_Mv/{ym}/DYAMONDv2_c2880_L181.inst_01hr_3d_{var3d}_Mv.{ymdh}z.nc4")[0]
+            if mode_DYAMOND:
+                fname = glob.glob(f"{root}/inst_01hr_3d_{var3d}_Mv/{ym}/DYAMONDv2_c2880_L181.inst_01hr_3d_{var3d}_Mv.{ymdh}z.nc4")[0]
+
             flist.append(fname)
 
         # Add the 2D 15min data (but we can sample at the hour)
-        flist.append(f"{root}/inst_15mn_2d_asm_Mx/{ym}/DYAMONDv2_c2880_L181.inst_15mn_2d_asm_Mx.{ymdh}z.nc4")
+        if mode_DYAMOND:
+            flist.append(f"{root}/inst_15mn_2d_asm_Mx/{ym}/DYAMONDv2_c2880_L181.inst_15mn_2d_asm_Mx.{ymdh}z.nc4")
 
     dataset = xr.open_mfdataset(
         flist,
@@ -508,18 +535,19 @@ def main():
     # We need to load the const data seperately because they have different time stamps
     # Add the 2D const data (only 0000z)
 
-    dataset_const = xr.open_dataset(
-        f"{root}/const_2d_asm_Mx/{ym}/DYAMONDv2_c2880_L181.const_2d_asm_Mx.{ymd}_0000z.nc4",
-        drop_variables=[
-            "anchor",
-            "contacts",
-            "ncontact",
-            "corner_lons",
-            "corner_lats",
-            "orientation",
-        ],
-        chunks={"Nf": "auto"}
-    )
+    if mode_DYAMOND:
+        dataset_const = xr.open_dataset(
+            f"{root}/const_2d_asm_Mx/{ym}/DYAMONDv2_c2880_L181.const_2d_asm_Mx.{ymd}_0000z.nc4",
+            drop_variables=[
+                "anchor",
+                "contacts",
+                "ncontact",
+                "corner_lons",
+                "corner_lats",
+                "orientation",
+            ],
+            chunks={"Nf": "auto"}
+        )
 
     dataset_const["time"] = dataset["time"]
     # push into main dataset ..
