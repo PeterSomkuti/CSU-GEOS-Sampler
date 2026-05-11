@@ -22,6 +22,7 @@ import shutil
 import sys
 from tqdm import tqdm
 import xarray as xr
+import warnings
 
 
 # Useful constants:
@@ -43,22 +44,27 @@ def setup_argparse():
         epilog="Author: Peter Somkuti"
     )
 
+    # Required
     parser.add_argument("--scene", type=str, required=True,
                         help="Scene file location")
     parser.add_argument("--output", type=str, required=True,
                         help="Output file location.")
 
+    # Optional
     parser.add_argument("--DYAMONDroot", type=str, required=False,
                         help="Path to DYAMOND run root directory.")
+
     parser.add_argument("--NN", type=int, required=False, default=1,
                         help="Number of nearest neighbors for cube-sphere sampling.")
+
+    # Boolean flags
     parser.add_argument("--overwrite", action="store_true", default=False,
                         help="Overwrite existing output file.")
     parser.add_argument("--parallel", action="store_true", default=False,
                         help="Use distributed computing?")
-    parser.add_argument("--use_cf", action="store_true", default=True,
+    parser.add_argument("--use_cf", action="store_true", default=False,
                         help="Use cloud fraction to compute LWP/IWP?")
-    parser.add_argument("--remove_existing", action="store_true", default=True,
+    parser.add_argument("--remove_existing", action="store_true", default=False,
                         help="Remove existing cloud data?")
 
 
@@ -394,6 +400,13 @@ def g_from_alt_and_lat(alt, lat):
 
 def main():
 
+    # Get rid of this xarray warning for duplicate dimensions. We cannot
+    # really fix this due to the way how the cube-sphere files are structured..
+    warnings.filterwarnings("ignore", message=".*We do not yet support duplicate dimension names.*")
+
+
+
+
     args = setup_argparse()
     setup_logging()
 
@@ -432,9 +445,9 @@ def main():
         logging.info(f"Root directory for DYAMOND supplied: {root}")
 
 
-    if (~mode_DYAMOND) and (~mode_GEOSCARB):
+    if (not mode_DYAMOND) and (not mode_GEOSCARB):
         logging.error("Need to set at least `DYAMONDroot` or `GEOSCARBroot`!")
-        sys.exit(!)
+        sys.exit(1)
 
     h5_scene = h5py.File(args.scene, "r")
 
@@ -493,7 +506,9 @@ def main():
     # Make a list of files that we need to *consider* reading
     flist = []
 
-    varlist_3d = ["AIRDENS", "QL", "RL", "QI", "RI", "FCLD", "QV", "DELP", "P", "CO2", "H", "T"]
+    varlist_3d = ["AIRDENS", "QL", "RL", "QI", "RI", "QV", "DELP", "P", "CO2", "H", "T"]
+    if args.use_cf:
+        varlist_3d.append("FCLD")
     # add aerosols
     # (note that SU aerosols are named `SO4` in the DYAMOND collection)
     aerlist = ["BC", "DU", "OC", "SS", "SO4"]
@@ -536,6 +551,7 @@ def main():
     # Add the 2D const data (only 0000z)
 
     if mode_DYAMOND:
+
         dataset_const = xr.open_dataset(
             f"{root}/const_2d_asm_Mx/{ym}/DYAMONDv2_c2880_L181.const_2d_asm_Mx.{ymd}_0000z.nc4",
             drop_variables=[
@@ -610,22 +626,37 @@ def main():
     IWP = sampled_data["QI"] * sampled_data["DELP"] / 9.80665
     WP = IWP + LWP
 
-    # Average cloud fraction for the total column, weighted by the total cloud water content
-    # See 10.1175/2009JAMC2170.1, scheme 2O
-    Cav = np.zeros(len(locations_df))
-    idx_good = WP.sum(axis=1) > 0
-    Cav[idx_good] = ( (WP) * sampled_data["FCLD"] )[idx_good,:].sum(axis=1) / (WP[idx_good,:]).sum(axis=1)
+    # If the user wants to use cloud fractions, we will produce weighted water paths:
+    if args.use_cf:
 
-    # now use Cav to produce LWC, IWC (not needed though)
-    #LWC_w = LWC / Cav[:, np.newaxis]
-    #LWC_w[np.isnan(LWC_w)] = 0
-    #IWC_w = IWC / Cav[:, np.newaxis]
-    #IWC_w[np.isnan(IWC_w)] = 0
+        logging.info("Using cloud-fractions!")
 
-    LWP_w = LWP / Cav[:, np.newaxis]
-    LWP_w[np.isnan(LWP_w)] = 0
-    IWP_w = IWP / Cav[:, np.newaxis]
-    IWP_w[np.isnan(IWP_w)] = 0
+        # Average cloud fraction for the total column, weighted by the total cloud water content
+        # See 10.1175/2009JAMC2170.1, scheme 2O
+        Cav = np.zeros(len(locations_df))
+        idx_good = WP.sum(axis=1) > 0
+        Cav[idx_good] = ( (WP) * sampled_data["FCLD"] )[idx_good,:].sum(axis=1) / (WP[idx_good,:]).sum(axis=1)
+
+        # now use Cav to produce LWC, IWC (not needed though)
+        #LWC_w = LWC / Cav[:, np.newaxis]
+        #LWC_w[np.isnan(LWC_w)] = 0
+        #IWC_w = IWC / Cav[:, np.newaxis]
+        #IWC_w[np.isnan(IWC_w)] = 0
+
+        #LWP_w = LWP / Cav[:, np.newaxis]
+        #LWP_w[np.isnan(LWP_w)] = 0
+        #IWP_w = IWP / Cav[:, np.newaxis]
+        #IWP_w[np.isnan(IWP_w)] = 0
+
+        LWP_w = np.where(Cav[:, np.newaxis] != 0, LWP / Cav[:, np.newaxis], 0.)
+        IWP_w = np.where(Cav[:, np.newaxis] != 0, IWP / Cav[:, np.newaxis], 0.)
+
+    else:
+
+        # If user does NOT want cloud fractions, we just use the
+        # non-weighted LWP/IWPs
+        LWP_w = LWP
+        IWP_w = IWP
 
 
     # Optical depth approximation:
@@ -754,10 +785,12 @@ def main():
         M_moist = Mdry * (1 - q) + Mwv * q
 
         # Moles of moist air per layer
-        out["Gas"]["species_density"][i_scene,0,:] = sampled_data["DELP"][i_scene] / (out["Thermodynamic"]["gravity_layer"][i_scene] * M_moist)
+        out["Gas"]["species_density"][i_scene,0,:] = \
+            sampled_data["DELP"][i_scene] / (out["Thermodynamic"]["gravity_layer"][i_scene] * M_moist)
 
         # Moles of dry air per layer
-        out["Gas"]["species_density"][i_scene,1,:] = sampled_data["DELP"][i_scene] / (out["Thermodynamic"]["gravity_layer"][i_scene] * Mdry)
+        out["Gas"]["species_density"][i_scene,1,:] = \
+            sampled_data["DELP"][i_scene] / (out["Thermodynamic"]["gravity_layer"][i_scene] * Mdry)
         out["Gas"]["species_density"][i_scene,1,:] *= (1 - sampled_data["QV"][i_scene])
 
         # Produce H2O VMR from humidity
@@ -769,7 +802,8 @@ def main():
         out["Gas"]["species_density"][i_scene,4,:] = 0.20945 * out["Gas"]["species_density"][i_scene,1,:]
 
         # Set CO2 to be whatever the GEOS output tells us
-        out["Gas"]["species_density"][i_scene,3,:] = sampled_data["CO2"][i_scene, :] * out["Gas"]["species_density"][i_scene,1,:]
+        out["Gas"]["species_density"][i_scene,3,:] = \
+            sampled_data["CO2"][i_scene, :] * out["Gas"]["species_density"][i_scene,1,:]
 
         out["Gas"]["num_species"][i_scene] = 5 # (moist air, dry air, H2O, CO2, O2)
 
@@ -861,7 +895,10 @@ def main():
     ## Add a cloud grop for cloud diagnostics
 
     out["Cloud"] = dict()
-    out["Cloud"]["Cav"] = Cav
+
+    # Only store Cav if user does cloud fractions
+    if args.use_cf:
+        out["Cloud"]["Cav"] = Cav
 
     out["Cloud"]["cloud_liquid_water_optical_depth"] = TAU_CL
     out["Cloud"]["cloud_ice_water_optical_depth"] = TAU_CI
