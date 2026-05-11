@@ -64,9 +64,6 @@ def setup_argparse():
                         help="Use distributed computing?")
     parser.add_argument("--use_cf", action="store_true", default=False,
                         help="Use cloud fraction to compute LWP/IWP?")
-    parser.add_argument("--remove_existing", action="store_true", default=False,
-                        help="Remove existing cloud data?")
-
 
 
     return parser.parse_args()
