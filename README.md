@@ -1,6 +1,8 @@
 Scripts for sampling GEOS model run collections at locations specified by CSU-type scene files.
 
-This program takes an existing CSU scene file, extracts scene locations and observation geometries, and then produces a new scene file with a new atmospheric state derived from either a GEOS DYAMOND run or some other more generic GEOS run. The new scene will have the native GEOS model run vertical resolution, and **all existing atmospheric states of the original scene are removed and replaced by those of the source GEOS run**. Water and ice clouds are either used as-is, or modified via the model cloud fractions with a two-column scheme from 10.1175/2009JAMC2170.1.
+This program takes an existing CSU scene file, extracts scene locations and observation geometries, and then produces a new scene file with a new atmospheric state derived from either a GEOS DYAMOND run or some other more generic GEOS run. The new scene will have the native GEOS model run vertical resolution, and **all existing atmospheric states of the original scene are removed and replaced by those of the source GEOS run**. **The original CSU scene file is not modified**. 
+
+Water and ice clouds are either used as-is, or modified via the model cloud fractions with a two-column scheme from [10.1175/2009JAMC2170.1](https://doi.org/10.1175/2009jamc2170.1). **Using the cloud fraction scheme requires a 2-pass approach in the radiative tranfer!**
 
 Aerosol distributions and profiles from GEOS are ingested into the new scene file as well, however it is required to use the ECMWF CAMS aerosol reanalysis to distribute the aerosol masses per species into different size bins. The final scene file will thus have the atmospheric state (pressure levels, surface pressure, gas volume mixing ratios, aerosol profiles and aerosol spatial distributions) from GEOS, but the aerosols optical properties and the splitting into various size bins is derived from CAMS.
 
@@ -59,6 +61,8 @@ uv run Sample_GEOS.py \
     --overwrite \
     --use_cf
 ```
+
+The average cloud fraction (Cav, Eq. 5 in 10.1175/2009JAMC2170.1) is stored in the scene files under `Cloud/Cav` if the user ran the program with `--use_cf`.
 
 ## CAMS Sampler Usage
 
