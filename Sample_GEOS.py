@@ -3,13 +3,8 @@ import argparse
 import logging
 
 
-import dask
-import dask.array as da
-from dask.distributed import progress
 from dask.distributed import Client
-from dask.diagnostics import ProgressBar
 import h5py
-from IPython import embed
 import glob
 import numpy as np
 import os
@@ -18,7 +13,6 @@ import pickle
 # this is a slimmer and faster library, however cannot be pickled! - shame!
 #from pykdtree.kdtree import KDTree
 from scipy.spatial import cKDTree
-import shutil
 import sys
 from tqdm import tqdm
 import xarray as xr
@@ -309,9 +303,6 @@ def sample_with_cubesphere(
     for var2d in varlist_2d:
         sample_dict[var2d] = np.zeros((len(locations_df), NN))
 
-    # Create an xarray DataArray that we fill with indices to grab one level at a time
-    lev_array = xr.DataArray(np.zeros(len(locations_df), dtype=int), dims="points")
-
     print("Performing sampling..")
     for var3d in varlist_3d:
         print(f"Sampling 3D var: {var3d}")
@@ -454,7 +445,6 @@ def main():
 
     Nframe, Nband, Nfp = scene_lons.shape
     N_scene, N_scene_levels = h5_scene['Simulation/Thermodynamic/pressure_level'].shape
-    N_scene_layers = N_scene_levels - 1
 
     # Fudge scene epoch so we can use the DYAMOND runs
     scene_epoch[:,:,:,0] = 2020
@@ -609,18 +599,13 @@ def main():
         logging.error(np.where(sampled_data["Plevs"][neg_P, 0] > sampled_data["Plevs"][neg_P, 1]))
         sys.exit(1)
 
-    # Calculate LWC and IWC
-    # (these are the profiles we must copy into the scene files .. after interpolation)
-
-    LWC = sampled_data["QL"] * sampled_data["AIRDENS"]
-    IWC = sampled_data["QI"] * sampled_data["AIRDENS"]
-
     # This is obviously an approximation. We do not have quick access to
     # the layer thickness in [m], so instead of calculating QI * \Delta z,
     # we use QI * \Delta p / g. Since we also do not have access to per-layer g,
     # we choose some value and live with the inaccuracies..
     LWP = sampled_data["QL"] * sampled_data["DELP"] / 9.80665
     IWP = sampled_data["QI"] * sampled_data["DELP"] / 9.80665
+
     WP = IWP + LWP
 
     # If the user wants to use cloud fractions, we will produce weighted water paths:
@@ -633,12 +618,6 @@ def main():
         Cav = np.zeros(len(locations_df))
         idx_good = WP.sum(axis=1) > 0
         Cav[idx_good] = ( (WP) * sampled_data["FCLD"] )[idx_good,:].sum(axis=1) / (WP[idx_good,:]).sum(axis=1)
-
-        # now use Cav to produce LWC, IWC (not needed though)
-        #LWC_w = LWC / Cav[:, np.newaxis]
-        #LWC_w[np.isnan(LWC_w)] = 0
-        #IWC_w = IWC / Cav[:, np.newaxis]
-        #IWC_w[np.isnan(IWC_w)] = 0
 
         #LWP_w = LWP / Cav[:, np.newaxis]
         #LWP_w[np.isnan(LWP_w)] = 0
