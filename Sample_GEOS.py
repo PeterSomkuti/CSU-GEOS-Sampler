@@ -10,8 +10,9 @@ import numpy as np
 import os
 import pandas as pd
 import pickle
+
 # this is a slimmer and faster library, however cannot be pickled! - shame!
-#from pykdtree.kdtree import KDTree
+# from pykdtree.kdtree import KDTree
 from scipy.spatial import cKDTree
 import sys
 from tqdm import tqdm
@@ -20,61 +21,85 @@ import warnings
 
 
 # Useful constants:
-Mwv = 0.0180153 # [kg/mol]
-Mdry = 0.0289644 # [kg/mol]
+Mwv = 0.0180153  # [kg/mol]
+Mdry = 0.0289644  # [kg/mol]
 eps = Mwv / Mdry
 
 
-
 def setup_argparse():
-    '''
+    """
     Sets up the arguments for the program
 
     Returns:
         args (argparse.Namespace): parsed arguments
-    '''
+    """
     parser = argparse.ArgumentParser(
-        description="Sample GEOS for CSU scene files",
-        epilog="Author: Peter Somkuti"
+        description="Sample GEOS for CSU scene files", epilog="Author: Peter Somkuti"
     )
 
     # Required
-    parser.add_argument("--scene", type=str, required=True,
-                        help="Scene file location")
-    parser.add_argument("--output", type=str, required=True,
-                        help="Output file location.")
+    parser.add_argument("--scene", type=str, required=True, help="Scene file location")
+    parser.add_argument(
+        "--output", type=str, required=True, help="Output file location."
+    )
 
     # Optional
-    parser.add_argument("--DYAMONDroot", type=str, required=False,
-                        help="Path to DYAMOND run root directory.")
+    parser.add_argument(
+        "--DYAMONDroot",
+        type=str,
+        required=False,
+        help="Path to DYAMOND run root directory.",
+    )
 
-    parser.add_argument("--NN", type=int, required=False, default=1,
-                        help="Number of nearest neighbors for cube-sphere sampling.")
+    parser.add_argument(
+        "--NN",
+        type=int,
+        required=False,
+        default=1,
+        help="Number of nearest neighbors for cube-sphere sampling.",
+    )
 
     # Boolean flags
-    parser.add_argument("--overwrite", action="store_true", default=False,
-                        help="Overwrite existing output file.")
-    parser.add_argument("--parallel", action="store_true", default=False,
-                        help="Use distributed computing?")
-    parser.add_argument("--use_cf", action="store_true", default=False,
-                        help="Use cloud fraction to compute LWP/IWP?")
-
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        default=False,
+        help="Overwrite existing output file.",
+    )
+    parser.add_argument(
+        "--parallel",
+        action="store_true",
+        default=False,
+        help="Use distributed computing?",
+    )
+    parser.add_argument(
+        "--use_cf",
+        action="store_true",
+        default=False,
+        help="Use cloud fraction to compute LWP/IWP?",
+    )
 
     return parser.parse_args()
 
 
 def setup_logging():
-    '''
+    """
     Sets up logging module, setting log format and level
-    '''
+    """
     log_level = logging.INFO
-    logging.basicConfig(format="%(asctime)s [%(levelname)-8s] (%(funcName)s:%(lineno)d) %(message)s", level=log_level)
+    logging.basicConfig(
+        format="%(asctime)s [%(levelname)-8s] (%(funcName)s:%(lineno)d) %(message)s",
+        level=log_level,
+    )
+
 
 def round_to_multiple(x, multiple):
-    return np.round(x/multiple) * multiple
+    return np.round(x / multiple) * multiple
+
 
 def find_indices(input_list, search_string):
     return [xc for xc, x in enumerate(input_list) if search_string in str(x)]
+
 
 def find_first_nonempty(row):
 
@@ -92,6 +117,7 @@ def find_first_nonempty(row):
         return -1
 
     return -1
+
 
 def hdf5_to_dict(hdf5_object):
     """
@@ -115,7 +141,6 @@ def hdf5_to_dict(hdf5_object):
     result = {}
 
     for key, item in hdf5_object.items():
-
         if isinstance(item, h5py.Group):
             # Recursively build a sub-dictionary for this group
             result[key] = hdf5_to_dict(item)
@@ -133,6 +158,7 @@ def hdf5_to_dict(hdf5_object):
             result[key] = data
 
     return result
+
 
 def dict_to_hdf5(data_dict, hdf5_object, compression="gzip", compression_opts=4):
     """
@@ -164,15 +190,18 @@ def dict_to_hdf5(data_dict, hdf5_object, compression="gzip", compression_opts=4)
     # If a file path string is passed, open/create the file and recurse
     if isinstance(hdf5_object, str):
         with h5py.File(hdf5_object, "w") as f:
-            dict_to_hdf5(data_dict, f, compression=compression, compression_opts=compression_opts)
+            dict_to_hdf5(
+                data_dict, f, compression=compression, compression_opts=compression_opts
+            )
         return
 
     for key, value in data_dict.items():
-
         if isinstance(value, dict):
             # Create a new group and recurse into it
             group = hdf5_object.require_group(key)
-            dict_to_hdf5(value, group, compression=compression, compression_opts=compression_opts)
+            dict_to_hdf5(
+                value, group, compression=compression, compression_opts=compression_opts
+            )
 
         else:
             # --- Sanitize the value before writing ---
@@ -203,12 +232,8 @@ def dict_to_hdf5(data_dict, hdf5_object, compression="gzip", compression_opts=4)
                 compression_opts=compression_opts if is_compressible else None,
             )
 
-def sample_with_cubesphere(
-        dataset,
-        locations_df,
-        varlist_3d,
-        varlist_2d,
-        NN=4):
+
+def sample_with_cubesphere(dataset, locations_df, varlist_3d, varlist_2d, NN=4):
 
     # Create the per-face KDTrees for coordinate lookup
     # (this takes a few seconds sadly..)
@@ -218,41 +243,35 @@ def sample_with_cubesphere(
         for face in range(6):
             logging.info(f"Building tree for face {face}")
             tree_coords = np.column_stack([
-                dataset.lons[face,:,:].values.flatten(),
-                dataset.lats[face,:,:].values.flatten()
+                dataset.lons[face, :, :].values.flatten(),
+                dataset.lats[face, :, :].values.flatten(),
             ])
 
             face_trees[face] = cKDTree(tree_coords)
-            #face_trees[face] = BallTree(data, metric='haversine') # this is too slow!!
-
+            # face_trees[face] = BallTree(data, metric='haversine') # this is too slow!!
 
         logging.info("Saving face trees ..")
-        with open("face_trees.pickle", 'wb') as file:
+        with open("face_trees.pickle", "wb") as file:
             pickle.dump(face_trees, file)
         logging.info("Done creating face trees.")
 
     else:
-
         # Load pickled tree
         logging.info("Loading face trees ..")
-        with open("face_trees.pickle", 'rb') as file:
+        with open("face_trees.pickle", "rb") as file:
             face_trees = pickle.load(file)
         logging.info("Done loading face trees.")
 
     # Now we find the right face and indices where we can look up
     # the various GEOS variables
 
-    _coords = np.column_stack([
-        locations_df.lon.values,
-        locations_df.lat.values
-    ])
+    _coords = np.column_stack([locations_df.lon.values, locations_df.lat.values])
 
     dist_all = np.zeros((6, len(locations_df), NN), dtype=float)
     idx_all = np.zeros((6, len(locations_df), NN), dtype=int)
 
     for face in range(6):
-
-        _res = face_trees[face].query(_coords, k = NN)
+        _res = face_trees[face].query(_coords, k=NN)
 
         if NN == 1:
             # .query doesn't return a 2-d array if k = 1
@@ -269,26 +288,25 @@ def sample_with_cubesphere(
 
     # For every scene, we pick the face that shows the smallest
     # distance to a model grid point.
-    face_idx_all = np.argmin(dist_all[:,:,0], axis=0)
+    face_idx_all = np.argmin(dist_all[:, :, 0], axis=0)
     locations_df.loc[:, "face_idx"] = face_idx_all
 
     # Calculate x/y indices from flat indices, taken from the
     # face we believe is the one to use.
     xy_idx_sel = np.unravel_index(
-        idx_all[face_idx_all, np.arange(len(locations_df))],
-        dataset.lons.shape[1:]
+        idx_all[face_idx_all, np.arange(len(locations_df))], dataset.lons.shape[1:]
     )
 
     for i in range(NN):
         # Pay attention to the indices: 0 -> y, 1 -> x
-        locations_df.loc[:, f"x_idx_{i}"] = xy_idx_sel[1][:,i]
-        locations_df.loc[:, f"y_idx_{i}"] = xy_idx_sel[0][:,i]
+        locations_df.loc[:, f"x_idx_{i}"] = xy_idx_sel[1][:, i]
+        locations_df.loc[:, f"y_idx_{i}"] = xy_idx_sel[0][:, i]
 
     # Calculate interpolation weights take from the face be believe is the one to use.
     # (we use 1 / distance^2 weighting)
-    weight_sel = 1 / (dist_all[face_idx_all, np.arange(len(locations_df))])**2
+    weight_sel = 1 / (dist_all[face_idx_all, np.arange(len(locations_df))]) ** 2
     # Normalize
-    #weight_sel = (weight_sel.T / weight_sel.sum(axis=1)).T
+    # weight_sel = (weight_sel.T / weight_sel.sum(axis=1)).T
     weight_sel /= weight_sel.sum(axis=1)[:, np.newaxis]
 
     for i in range(NN):
@@ -308,13 +326,12 @@ def sample_with_cubesphere(
         print(f"Sampling 3D var: {var3d}")
 
         for i in tqdm(range(NN)):
-
             _grab = dataset[var3d].isel(
                 time=0,
                 nf=xr.DataArray(locations_df.face_idx, dims="points"),
                 Ydim=xr.DataArray(locations_df[f"y_idx_{i}"], dims="points"),
                 Xdim=xr.DataArray(locations_df[f"x_idx_{i}"], dims="points"),
-                lev=range(len(dataset.lev))
+                lev=range(len(dataset.lev)),
             )
 
             _grab.load()
@@ -324,7 +341,6 @@ def sample_with_cubesphere(
         print(f"Sampling 2D var: {var2d}")
 
         for i in tqdm(range(NN)):
-
             _grab = dataset[var2d].isel(
                 time=0,
                 nf=xr.DataArray(locations_df.face_idx, dims="points"),
@@ -335,13 +351,13 @@ def sample_with_cubesphere(
             _grab.load()
             sample_dict[var2d][:, i] = _grab.values.T
 
-
     # Check if there are any zero-only arrays, i.e.
     # the sampling didn't yield anything useful.
     for var in sample_dict.keys():
         if np.all(sample_dict[var] == 0):
-            logging.warning(f"Variable {var} sampled to all zeroes! (maybe something went wrong)")
-
+            logging.warning(
+                f"Variable {var} sampled to all zeroes! (maybe something went wrong)"
+            )
 
     # Apply the distance-based weighting for all variables
     sample_weighted = {}
@@ -351,7 +367,10 @@ def sample_with_cubesphere(
         tmp = np.zeros((len(locations_df), len(dataset.lev)))
 
         for i in range(NN):
-            tmp[:,:] += sample_dict[var3d][:,:,i] * locations_df[f"weight_{i}"].values[:, np.newaxis]
+            tmp[:, :] += (
+                sample_dict[var3d][:, :, i]
+                * locations_df[f"weight_{i}"].values[:, np.newaxis]
+            )
 
         sample_weighted[var3d] = tmp
 
@@ -360,7 +379,7 @@ def sample_with_cubesphere(
         tmp = np.zeros(len(locations_df))
 
         for i in range(NN):
-            tmp[:] += sample_dict[var2d][:,i] * locations_df[f"weight_{i}"].values[:]
+            tmp[:] += sample_dict[var2d][:, i] * locations_df[f"weight_{i}"].values[:]
 
         sample_weighted[var2d] = tmp
 
@@ -373,41 +392,47 @@ def find_closest_indices(X, Y):
     srt = np.array([np.argmin(np.abs(X - y)) for y in Y])
     return srt
 
+
 def g_from_latitude(lat):
 
     latrad = np.deg2rad(lat)
-    return 9.780327 * (1 + 0.0053024 * np.sin(latrad)**2 - 0.0000058 * np.sin(2*latrad)**2)
+    return 9.780327 * (
+        1 + 0.0053024 * np.sin(latrad) ** 2 - 0.0000058 * np.sin(2 * latrad) ** 2
+    )
+
 
 def g_from_alt_and_lat(alt, lat):
 
     # Alt must be in m for this..
     Re = 6_371_000.0
     g0 = g_from_latitude(lat)
-    return g0 * (Re / (Re + alt))**2
+    return g0 * (Re / (Re + alt)) ** 2
 
 
 def main():
 
     # Get rid of this xarray warning for duplicate dimensions. We cannot
     # really fix this due to the way how the cube-sphere files are structured..
-    warnings.filterwarnings("ignore", message=".*We do not yet support duplicate dimension names.*")
-
-
-
+    warnings.filterwarnings(
+        "ignore", message=".*We do not yet support duplicate dimension names.*"
+    )
 
     args = setup_argparse()
     setup_logging()
 
     logging.info(args.overwrite)
     # Check here already if the file exists
-    if (os.path.exists(args.output) and (not args.overwrite)):
-        logging.warning(f"Output file location: {args.output} exists! Use `--overwrite "
-                        "if you want to overwrite existing files!"
+    if os.path.exists(args.output) and (not args.overwrite):
+        logging.warning(
+            f"Output file location: {args.output} exists! Use `--overwrite "
+            "if you want to overwrite existing files!"
         )
         return
 
-    if (os.path.exists(args.output) and args.overwrite):
-        logging.warning(f"Output file location: {args.output} exists! You chose to overwrite!")
+    if os.path.exists(args.output) and args.overwrite:
+        logging.warning(
+            f"Output file location: {args.output} exists! You chose to overwrite!"
+        )
 
     if args.parallel:
         logging.info("Using parallel computing:")
@@ -417,7 +442,6 @@ def main():
         client = None
         logging.info("Only serial computations..")
 
-
     # Flags that tell our code whether we are working with
     #   a) DYAMOND model run files
     #   b) GEOS CARB ana files
@@ -426,12 +450,10 @@ def main():
     mode_GEOSCARB = False
 
     if args.DYAMONDroot is not None:
-
         mode_DYAMOND = True
         root = args.DYAMONDroot
         # Should be something like "/css/g5nr/DYAMONDv2/03KM/DYAMONDv2_c2880_L181"
         logging.info(f"Root directory for DYAMOND supplied: {root}")
-
 
     if (not mode_DYAMOND) and (not mode_GEOSCARB):
         logging.error("Need to set at least `DYAMONDroot` or `GEOSCARBroot`!")
@@ -444,22 +466,24 @@ def main():
     scene_epoch = h5_scene["Simulation/Time/epoch"][:]
 
     Nframe, Nband, Nfp = scene_lons.shape
-    N_scene, N_scene_levels = h5_scene['Simulation/Thermodynamic/pressure_level'].shape
+    N_scene, N_scene_levels = h5_scene["Simulation/Thermodynamic/pressure_level"].shape
 
     # Fudge scene epoch so we can use the DYAMOND runs
-    scene_epoch[:,:,:,0] = 2020
-    scene_epoch[:,:,:,1] = 2
-    scene_epoch[:,:,:,2] = 1
-
+    scene_epoch[:, :, :, 0] = 2020
+    scene_epoch[:, :, :, 1] = 2
+    scene_epoch[:, :, :, 2] = 1
 
     # Create datetime objects
     scene_times = np.zeros((Nframe, Nband, Nfp), dtype="datetime64[ms]")
     for fr in range(Nframe):
         for band in range(Nband):
             for fp in range(Nfp):
-
-                scene_times[fr, band, fp] = pd.Timestamp(*(scene_epoch[fr,band,fp])).to_numpy().astype("datetime64[ms]")
-
+                scene_times[fr, band, fp] = (
+                    pd
+                    .Timestamp(*(scene_epoch[fr, band, fp]))
+                    .to_numpy()
+                    .astype("datetime64[ms]")
+                )
 
     # Flatten things out into a data array to be sampled
     # (note that here we will ignore the band dimension, assume that all bands
@@ -467,14 +491,14 @@ def main():
 
     locations_df = pd.DataFrame(index=range(Nframe))
 
-    locations_df.loc[:, "lon"] = scene_lons[:,0,:].flatten()
-    locations_df.loc[:, "lat"] = scene_lats[:,0,:].flatten()
-    locations_df.loc[:, "time"] = scene_times[:,0,:].flatten()
+    locations_df.loc[:, "lon"] = scene_lons[:, 0, :].flatten()
+    locations_df.loc[:, "lat"] = scene_lats[:, 0, :].flatten()
+    locations_df.loc[:, "time"] = scene_times[:, 0, :].flatten()
 
-    locations_df.loc[:, "year"] = scene_epoch[:,0,:,0].flatten()
-    locations_df.loc[:, "month"] = scene_epoch[:,0,:,1].flatten()
-    locations_df.loc[:, "day"] = scene_epoch[:,0,:,2].flatten()
-    locations_df.loc[:, "hour"] = scene_epoch[:,0,:,3].flatten()
+    locations_df.loc[:, "year"] = scene_epoch[:, 0, :, 0].flatten()
+    locations_df.loc[:, "month"] = scene_epoch[:, 0, :, 1].flatten()
+    locations_df.loc[:, "day"] = scene_epoch[:, 0, :, 2].flatten()
+    locations_df.loc[:, "hour"] = scene_epoch[:, 0, :, 3].flatten()
 
     locations_df.loc[:, ["idx_lon", "idx_lat"]] = -1
 
@@ -482,7 +506,7 @@ def main():
         return f"{row.year:04d}{row.month:02d}{row.day:02d}"
 
     def return_ymdh(row):
-        return f"{row.year:04d}{row.month:02d}{row.day:02d}_{100*row.hour:04d}"
+        return f"{row.year:04d}{row.month:02d}{row.day:02d}_{100 * row.hour:04d}"
 
     locations_df["ymd"] = locations_df.apply(return_ymd, axis=1)
     locations_df["ymdh"] = locations_df.apply(return_ymdh, axis=1)
@@ -504,19 +528,22 @@ def main():
     varlist_2d = ["PS", "PHIS"]
 
     for ymdh in un_ymdh:
-
         ym = ymdh[:6]
         ymd = ymdh[:8]
 
         for var3d in varlist_3d:
             if mode_DYAMOND:
-                fname = glob.glob(f"{root}/inst_01hr_3d_{var3d}_Mv/{ym}/DYAMONDv2_c2880_L181.inst_01hr_3d_{var3d}_Mv.{ymdh}z.nc4")[0]
+                fname = glob.glob(
+                    f"{root}/inst_01hr_3d_{var3d}_Mv/{ym}/DYAMONDv2_c2880_L181.inst_01hr_3d_{var3d}_Mv.{ymdh}z.nc4"
+                )[0]
 
             flist.append(fname)
 
         # Add the 2D 15min data (but we can sample at the hour)
         if mode_DYAMOND:
-            flist.append(f"{root}/inst_15mn_2d_asm_Mx/{ym}/DYAMONDv2_c2880_L181.inst_15mn_2d_asm_Mx.{ymdh}z.nc4")
+            flist.append(
+                f"{root}/inst_15mn_2d_asm_Mx/{ym}/DYAMONDv2_c2880_L181.inst_15mn_2d_asm_Mx.{ymdh}z.nc4"
+            )
 
     dataset = xr.open_mfdataset(
         flist,
@@ -531,14 +558,13 @@ def main():
         compat="override",
         coords="all",
         chunks={"Nf": "auto"},
-        parallel=(client is not None)
+        parallel=(client is not None),
     )
 
     # We need to load the const data seperately because they have different time stamps
     # Add the 2D const data (only 0000z)
 
     if mode_DYAMOND:
-
         dataset_const = xr.open_dataset(
             f"{root}/const_2d_asm_Mx/{ym}/DYAMONDv2_c2880_L181.const_2d_asm_Mx.{ymd}_0000z.nc4",
             drop_variables=[
@@ -549,7 +575,7 @@ def main():
                 "corner_lats",
                 "orientation",
             ],
-            chunks={"Nf": "auto"}
+            chunks={"Nf": "auto"},
         )
 
     dataset_const["time"] = dataset["time"]
@@ -568,13 +594,8 @@ def main():
     logging.info(f"(user-supplied value: {args.NN})")
 
     sampled_data = sample_with_cubesphere(
-        dataset,
-        locations_df,
-        varlist_3d,
-        varlist_2d,
-        NN=NN
+        dataset, locations_df, varlist_3d, varlist_2d, NN=NN
     )
-
 
     # Calculate surface-altitude from PHIS
     sampled_data["Z0"] = sampled_data["PHIS"] / 9.80665
@@ -584,19 +605,25 @@ def main():
     sampled_data["Plevs"] = np.zeros((N_scene, N_GEOS_lay + 1))
 
     # Insert surface pressure
-    sampled_data["Plevs"][:,N_GEOS_lay] = sampled_data["PS"]
+    sampled_data["Plevs"][:, N_GEOS_lay] = sampled_data["PS"]
 
-    for lev in range(N_GEOS_lay - 1, -1, -1): # count from surface to top
-        sampled_data["Plevs"][:,lev] = sampled_data["Plevs"][:,lev+1] - sampled_data["DELP"][:,lev]
+    for lev in range(N_GEOS_lay - 1, -1, -1):  # count from surface to top
+        sampled_data["Plevs"][:, lev] = (
+            sampled_data["Plevs"][:, lev + 1] - sampled_data["DELP"][:, lev]
+        )
 
     # Occasionally, the top pressure level will be < 0 (for some reason), so we replace those
     # by some predetermined nudge value and make sure it's not larger than the level below.
-    neg_P = np.where(sampled_data["Plevs"][:,0] < 0)[0]
-    sampled_data["Plevs"][neg_P,0] = np.maximum(0.1, sampled_data["Plevs"][neg_P,1] - 0.1)
+    neg_P = np.where(sampled_data["Plevs"][:, 0] < 0)[0]
+    sampled_data["Plevs"][neg_P, 0] = np.maximum(
+        0.1, sampled_data["Plevs"][neg_P, 1] - 0.1
+    )
 
     if np.any(sampled_data["Plevs"][neg_P, 0] > sampled_data["Plevs"][neg_P, 1]):
         logging.error("Problem with fixing top-level pressure!")
-        logging.error(np.where(sampled_data["Plevs"][neg_P, 0] > sampled_data["Plevs"][neg_P, 1]))
+        logging.error(
+            np.where(sampled_data["Plevs"][neg_P, 0] > sampled_data["Plevs"][neg_P, 1])
+        )
         sys.exit(1)
 
     # This is obviously an approximation. We do not have quick access to
@@ -610,30 +637,29 @@ def main():
 
     # If the user wants to use cloud fractions, we will produce weighted water paths:
     if args.use_cf:
-
         logging.info("Using cloud-fractions!")
 
         # Average cloud fraction for the total column, weighted by the total cloud water content
         # See 10.1175/2009JAMC2170.1, scheme 2O
         Cav = np.zeros(len(locations_df))
         idx_good = WP.sum(axis=1) > 0
-        Cav[idx_good] = ( (WP) * sampled_data["FCLD"] )[idx_good,:].sum(axis=1) / (WP[idx_good,:]).sum(axis=1)
+        Cav[idx_good] = ((WP) * sampled_data["FCLD"])[idx_good, :].sum(axis=1) / (
+            WP[idx_good, :]
+        ).sum(axis=1)
 
-        #LWP_w = LWP / Cav[:, np.newaxis]
-        #LWP_w[np.isnan(LWP_w)] = 0
-        #IWP_w = IWP / Cav[:, np.newaxis]
-        #IWP_w[np.isnan(IWP_w)] = 0
+        # LWP_w = LWP / Cav[:, np.newaxis]
+        # LWP_w[np.isnan(LWP_w)] = 0
+        # IWP_w = IWP / Cav[:, np.newaxis]
+        # IWP_w[np.isnan(IWP_w)] = 0
 
-        LWP_w = np.where(Cav[:, np.newaxis] != 0, LWP / Cav[:, np.newaxis], 0.)
-        IWP_w = np.where(Cav[:, np.newaxis] != 0, IWP / Cav[:, np.newaxis], 0.)
+        LWP_w = np.where(Cav[:, np.newaxis] != 0, LWP / Cav[:, np.newaxis], 0.0)
+        IWP_w = np.where(Cav[:, np.newaxis] != 0, IWP / Cav[:, np.newaxis], 0.0)
 
     else:
-
         # If user does NOT want cloud fractions, we just use the
         # non-weighted LWP/IWPs
         LWP_w = LWP
         IWP_w = IWP
-
 
     # Optical depth approximation:
     # ----------------------------
@@ -655,13 +681,13 @@ def main():
     # Following contents of the original scene file can be copied 1:1,
     # without the need for modification:
     for d in [
-            "Footprint",
-            "Geometry",
-            "Metadata",
-            "Orbit",
-            "Sounding",
-            "Surface",
-            "Time"
+        "Footprint",
+        "Geometry",
+        "Metadata",
+        "Orbit",
+        "Sounding",
+        "Surface",
+        "Time",
     ]:
         out[d] = hdf5_to_dict(h5_scene["Simulation"][d])
 
@@ -680,36 +706,37 @@ def main():
     out["Gas"]["species_id"] = np.zeros((N_scene, 10), dtype="|S16")
 
     # Note that these seem to be hard-coded in the CSU simulator
-    out["Gas"]["species_id"][:,0] = "AIR_moist".ljust(16, " ")
-    out["Gas"]["species_id"][:,1] = "AIR_dry".ljust(16, " ")
-    out["Gas"]["species_id"][:,2] = "H2O".ljust(16, " ")
-    out["Gas"]["species_id"][:,3] = "CO2".ljust(16, " ")
-    out["Gas"]["species_id"][:,4] = "O2".ljust(16, " ")
-    #out["Gas"]["species_id"][:,5] = "O3".ljust(16, " ")
-    #out["Gas"]["species_id"][:,6] = "CH4".ljust(16, " ")
-    #out["Gas"]["species_id"][:,7] = "CO".ljust(16, " ")
-    #out["Gas"]["species_id"][:,8] = "HDO".ljust(16, " ")
-
+    out["Gas"]["species_id"][:, 0] = "AIR_moist".ljust(16, " ")
+    out["Gas"]["species_id"][:, 1] = "AIR_dry".ljust(16, " ")
+    out["Gas"]["species_id"][:, 2] = "H2O".ljust(16, " ")
+    out["Gas"]["species_id"][:, 3] = "CO2".ljust(16, " ")
+    out["Gas"]["species_id"][:, 4] = "O2".ljust(16, " ")
+    # out["Gas"]["species_id"][:,5] = "O3".ljust(16, " ")
+    # out["Gas"]["species_id"][:,6] = "CH4".ljust(16, " ")
+    # out["Gas"]["species_id"][:,7] = "CO".ljust(16, " ")
+    # out["Gas"]["species_id"][:,8] = "HDO".ljust(16, " ")
 
     out["Gas"]["species_density"] = np.zeros((N_scene, 10, N_GEOS_lay))
 
-
     out["Aerosol"]["num_species"] = np.zeros(N_scene, dtype="int")
     out["Aerosol"]["species_id"] = np.zeros((N_scene, 100), dtype="|S16")
-    out["Aerosol"]["species_id"][:,:] = "none".ljust(16, " ")
-    out["Aerosol"]["species_density"] = np.zeros((N_scene, 100, N_GEOS_lay), dtype=np.float32)
+    out["Aerosol"]["species_id"][:, :] = "none".ljust(16, " ")
+    out["Aerosol"]["species_density"] = np.zeros(
+        (N_scene, 100, N_GEOS_lay), dtype=np.float32
+    )
 
     logging.info("Calculating meteorology ...")
 
     # Copy all surface elevations, these are the lowest level of the new altitude
     # level grid.
-    out["Thermodynamic"]["altitude_level"][:,-1] = sampled_data["Z0"]
+    out["Thermodynamic"]["altitude_level"][:, -1] = sampled_data["Z0"]
     # Altitude at level `lay`, say it's roughly between the mid-layer for layer `lay`
     # and the one below. The lowest level is always the surface, and the topmost level
     # is just approximated (per-scene, see below..)
-    out["Thermodynamic"]["altitude_level"][:,1:-1] = \
-        np.stack([sampled_data["H"][:,:-1], sampled_data["H"][:,1:]]).mean(0)
-
+    out["Thermodynamic"]["altitude_level"][:, 1:-1] = np.stack([
+        sampled_data["H"][:, :-1],
+        sampled_data["H"][:, 1:],
+    ]).mean(0)
 
     # =======================================
     # Temperature GEOS layers -> scene levels
@@ -718,29 +745,29 @@ def main():
     # the converted profile will be similarly "smooth".
 
     # Set the top T level to be the top model layer
-    out["Thermodynamic"]["temperature_level"][:,0] = sampled_data["T"][:,0]
+    out["Thermodynamic"]["temperature_level"][:, 0] = sampled_data["T"][:, 0]
     # Set the bottom T level to be the bottom model layer
-    out["Thermodynamic"]["temperature_level"][:,-1] = sampled_data["T"][:,-1]
+    out["Thermodynamic"]["temperature_level"][:, -1] = sampled_data["T"][:, -1]
     # Set the other levels to be mid-point of the adjacent layers
-    out["Thermodynamic"]["temperature_level"][:,1:-1] = 0.5 * (
-        sampled_data["T"][:,0:-1] + sampled_data["T"][:,1:]
-        )
+    out["Thermodynamic"]["temperature_level"][:, 1:-1] = 0.5 * (
+        sampled_data["T"][:, 0:-1] + sampled_data["T"][:, 1:]
+    )
 
     # =======================================
 
     for i_scene in tqdm(range(N_scene)):
-
         # Mid-layer gravity (approx.)
-        out["Thermodynamic"]["gravity_layer"][i_scene, :] = \
-            g_from_alt_and_lat(sampled_data["H"][i_scene, :], locations_df.lat[i_scene])
+        out["Thermodynamic"]["gravity_layer"][i_scene, :] = g_from_alt_and_lat(
+            sampled_data["H"][i_scene, :], locations_df.lat[i_scene]
+        )
 
         # Quick hack: fit a line through log10(p) vs. altitude for the profile, and
         # then evaluate for the missing point at the top of the atmosphere..
         _p = np.poly1d(
             np.polyfit(
-                np.log10(out["Thermodynamic"]["pressure_level"][i_scene,1:]),
-                out["Thermodynamic"]["altitude_level"][i_scene,1:],
-                1
+                np.log10(out["Thermodynamic"]["pressure_level"][i_scene, 1:]),
+                out["Thermodynamic"]["altitude_level"][i_scene, 1:],
+                1,
             )
         )
 
@@ -748,46 +775,47 @@ def main():
             np.log10(out["Thermodynamic"]["pressure_level"][i_scene, 0])
         )
 
-
-
     logging.info("Calculating gases ...")
     for i_scene in tqdm(range(N_scene)):
-
         # =========
         # Set gases
         # =========
-        q = sampled_data["QV"][i_scene] # shortcut
+        q = sampled_data["QV"][i_scene]  # shortcut
 
         M_moist = Mdry * (1 - q) + Mwv * q
 
         # Moles of moist air per layer
-        out["Gas"]["species_density"][i_scene,0,:] = \
-            sampled_data["DELP"][i_scene] / (out["Thermodynamic"]["gravity_layer"][i_scene] * M_moist)
+        out["Gas"]["species_density"][i_scene, 0, :] = sampled_data["DELP"][i_scene] / (
+            out["Thermodynamic"]["gravity_layer"][i_scene] * M_moist
+        )
 
         # Moles of dry air per layer
-        out["Gas"]["species_density"][i_scene,1,:] = \
-            sampled_data["DELP"][i_scene] / (out["Thermodynamic"]["gravity_layer"][i_scene] * Mdry)
-        out["Gas"]["species_density"][i_scene,1,:] *= (1 - sampled_data["QV"][i_scene])
+        out["Gas"]["species_density"][i_scene, 1, :] = sampled_data["DELP"][i_scene] / (
+            out["Thermodynamic"]["gravity_layer"][i_scene] * Mdry
+        )
+        out["Gas"]["species_density"][i_scene, 1, :] *= 1 - sampled_data["QV"][i_scene]
 
         # Produce H2O VMR from humidity
         # (h2o  = q / ((1 - q) * MM_H2O_TO_AIR + q))
 
-        out["Gas"]["species_density"][i_scene,2,:] = q / ((1 - q) * eps + q)
+        out["Gas"]["species_density"][i_scene, 2, :] = q / ((1 - q) * eps + q)
 
         # Set O2 always as 0.20945 parts of dry air
-        out["Gas"]["species_density"][i_scene,4,:] = 0.20945 * out["Gas"]["species_density"][i_scene,1,:]
+        out["Gas"]["species_density"][i_scene, 4, :] = (
+            0.20945 * out["Gas"]["species_density"][i_scene, 1, :]
+        )
 
         # Set CO2 to be whatever the GEOS output tells us
-        out["Gas"]["species_density"][i_scene,3,:] = \
-            sampled_data["CO2"][i_scene, :] * out["Gas"]["species_density"][i_scene,1,:]
+        out["Gas"]["species_density"][i_scene, 3, :] = (
+            sampled_data["CO2"][i_scene, :]
+            * out["Gas"]["species_density"][i_scene, 1, :]
+        )
 
-        out["Gas"]["num_species"][i_scene] = 5 # (moist air, dry air, H2O, CO2, O2)
-
+        out["Gas"]["num_species"][i_scene] = 5  # (moist air, dry air, H2O, CO2, O2)
 
     logging.info("Inserting water clouds ...")
     LWP_thres = 1e-20
     for i_scene in tqdm(range(N_scene)):
-
         # -----------
         # WATER CLOUD
         # -----------
@@ -801,7 +829,9 @@ def main():
         # We only look for Reff values which have corresponding LWP > some value
         # (GEOS produces Reff even if there is no cloud)
         unique_RL = np.unique(this_RL_profile[LWP_w[i_scene] > LWP_thres])
-        RL_labels = ['water_cloud_{:03d}'.format(int(x)).ljust(15, " ") for x in unique_RL]
+        RL_labels = [
+            "water_cloud_{:03d}".format(int(x)).ljust(15, " ") for x in unique_RL
+        ]
 
         start_insert = find_first_nonempty(out["Aerosol"]["species_id"][i_scene])
 
@@ -811,16 +841,17 @@ def main():
             if len(_idx) == 0:
                 continue
 
-            if (start_insert + k < out["Aerosol"]["species_id"].shape[1]):
-                out["Aerosol"]["species_id"][i_scene, start_insert+k] = RL_labels[k]
-                out["Aerosol"]["species_density"][i_scene, start_insert+k, _idx] = LWP_w[i_scene, _idx]
+            if start_insert + k < out["Aerosol"]["species_id"].shape[1]:
+                out["Aerosol"]["species_id"][i_scene, start_insert + k] = RL_labels[k]
+                out["Aerosol"]["species_density"][i_scene, start_insert + k, _idx] = (
+                    LWP_w[i_scene, _idx]
+                )
             else:
                 logging.info(f"Can't insert water cloud profile: {i_scene}")
 
     logging.info("Inserting ice clouds ...")
     IWP_thres = 1e-20
     for i_scene in tqdm(range(N_scene)):
-
         if IWP_w[i_scene].sum() == 0:
             continue
 
@@ -834,7 +865,9 @@ def main():
         # We only look for Reff values which have corresponding LWP > some value
         # (GEOS produces Reff even if there is no cloud)
         unique_RI = np.unique(this_RI_profile[IWP_w[i_scene] > IWP_thres])
-        RI_labels = ['ice_cloud_{:03d}'.format(int(x)).ljust(16, " ") for x in unique_RI]
+        RI_labels = [
+            "ice_cloud_{:03d}".format(int(x)).ljust(16, " ") for x in unique_RI
+        ]
 
         start_insert = find_first_nonempty(out["Aerosol"]["species_id"][i_scene])
 
@@ -844,13 +877,13 @@ def main():
             if len(_idx) == 0:
                 continue
 
-            if (start_insert + k < out["Aerosol"]["species_id"].shape[1]):
-                out["Aerosol"]["species_id"][i_scene, start_insert+k] = RI_labels[k]
-                out["Aerosol"]["species_density"][i_scene, start_insert+k, _idx] = IWP_w[i_scene, _idx]
+            if start_insert + k < out["Aerosol"]["species_id"].shape[1]:
+                out["Aerosol"]["species_id"][i_scene, start_insert + k] = RI_labels[k]
+                out["Aerosol"]["species_density"][i_scene, start_insert + k, _idx] = (
+                    IWP_w[i_scene, _idx]
+                )
             else:
                 logging.info(f"Can't insert ice cloud profile: {i_scene}")
-
-
 
     logging.info("Calculate aerosol total masses")
     # Aerosol mass in kg
@@ -860,13 +893,14 @@ def main():
         out["Aerosol"][f"{aer}_total_mass"] = np.zeros(N_scene)
 
         for i_scene in tqdm(range(N_scene)):
-            out["Aerosol"][f"{aer}_total_mass"][i_scene] = \
-                (sampled_data[aer][i_scene, :] * sampled_data["DELP"][i_scene,:] / 9.80665).sum()
-
+            out["Aerosol"][f"{aer}_total_mass"][i_scene] = (
+                sampled_data[aer][i_scene, :]
+                * sampled_data["DELP"][i_scene, :]
+                / 9.80665
+            ).sum()
 
     ## Computations are done!
     ## .. put together output dictionary!
-
 
     ## Add a cloud grop for cloud diagnostics
 
@@ -892,12 +926,10 @@ def main():
 
         out["Aerosol"]["num_species"][i_scene] = this_count
 
-
     # Now write out the contents of `out` into a new file
     h5_out = h5py.File(args.output, "w")
     h5_out.create_group("Simulation")
     dict_to_hdf5(out, h5_out["Simulation"])
-
 
     # Finalize
     h5_scene.close()
@@ -906,5 +938,5 @@ def main():
     logging.info("Finish.")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
